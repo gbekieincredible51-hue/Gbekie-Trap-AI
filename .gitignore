@@ -1,207 +1,174 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
+streamlit==1.32.0
+pandas==2.2.1
+numpy==1.26.4
+torch==2.2.1
+matplotlib==3.8.3
+import streamlit as st
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
 
-# C extensions
-*.so
+st.set_page_config(page_title="Gbekie Trap AI", layout="wide")
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+st.title("Gbekie Trap Demonstrator")
+st.markdown("""
+Transformer learns Ramadan study performance → multi-agent system shows **Language Trap** (oscillation)  
+→ **Gbekie Condition** (auto-damping) brings stability + humility score.
+""")
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+# ────────────────────────────────────────────────
+# Data upload / fallback
+# ────────────────────────────────────────────────
+uploaded_file = st.file_uploader("Upload ramadan_full_model.csv", type="csv")
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    st.success("CSV uploaded successfully!")
+else:
+    st.info("Using built-in sample data (30 days placeholder)")
+    df = pd.DataFrame({
+        'Sleep_hours': np.random.normal(5.0, 1.2, 30),
+        'Fasting_drag_F': np.linspace(1.0, 0.88, 30),
+        'Prayer_penalty_P': np.random.normal(0.92, 0.04, 30),
+        'Hydration_drag_H': np.linspace(1.0, 0.78, 30),
+        'Study_performance': np.random.uniform(1.0, 5.5, 30)
+    })
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
+features = ['Sleep_hours', 'Fasting_drag_F', 'Prayer_penalty_P', 'Hydration_drag_H']
+X = torch.tensor(df[features].values, dtype=torch.float32)
+y = torch.tensor(df['Study_performance'].values, dtype=torch.float32).unsqueeze(1)
 
-# Translations
-*.mo
-*.pot
+# ────────────────────────────────────────────────
+# Tiny Transformer
+# ────────────────────────────────────────────────
+class GbekieTransformer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder_layer = nn.TransformerEncoderLayer(
+            d_model=4, nhead=2, dim_feedforward=16, dropout=0.1, batch_first=True
+        )
+        self.encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
+        self.fc = nn.Linear(4, 1)
+        self.attn_weights = None
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+    def forward(self, x):
+        def hook(module, inp, out):
+            self.attn_weights = module.self_attn.attn_output_weights.detach().mean(dim=1).cpu().numpy()
 
-# Flask stuff:
-instance/
-.webassets-cache
+        h = self.encoder.layers[0].self_attn.register_forward_hook(hook)
+        x = x.unsqueeze(1)
+        x = self.encoder(x)
+        out = self.fc(x.squeeze(1))
+        h.remove()
+        return out
 
-# Scrapy stuff:
-.scrapy
+if 'model' not in st.session_state:
+    st.session_state.model = GbekieTransformer()
+    st.session_state.optimizer = torch.optim.Adam(st.session_state.model.parameters(), lr=0.005)
+    st.session_state.trained = False
 
-# Sphinx documentation
-docs/_build/
+model = st.session_state.model
 
-# PyBuilder
-.pybuilder/
-target/
+# Train button
+if st.button("Train Transformer (5 epochs)") or not st.session_state.trained:
+    with st.spinner("Training..."):
+        criterion = nn.MSELoss()
+        for _ in range(5):
+            model.train()
+            st.session_state.optimizer.zero_grad()
+            pred = model(X)
+            loss = criterion(pred, y)
+            loss.backward()
+            st.session_state.optimizer.step()
+        st.session_state.trained = True
+    st.success("Training complete!")
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Show predictions
+with torch.no_grad():
+    preds = model(X).squeeze().numpy()
 
-# IPython
-profile_default/
-ipython_config.py
+st.subheader("Transformer Predictions vs Actual")
+fig, ax = plt.subplots()
+ax.plot(df['Study_performance'], label="Actual", color="lime")
+ax.plot(preds, label="Predicted", color="cyan", linestyle="--")
+ax.set_xlabel("Day")
+ax.set_ylabel("Study Performance")
+ax.legend()
+st.pyplot(fig)
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+# ────────────────────────────────────────────────
+# Attention Visualization
+# ────────────────────────────────────────────────
+st.subheader("Attention Weights (Layer 1)")
+with torch.no_grad():
+    _ = model(X)  # trigger hook
+if model.attn_weights is not None:
+    fig, ax = plt.subplots()
+    im = ax.imshow(model.attn_weights, cmap='viridis')
+    plt.colorbar(im, ax=ax)
+    ax.set_title("Attention Heatmap")
+    ax.set_xlabel("Position")
+    ax.set_ylabel("Position")
+    st.pyplot(fig)
+else:
+    st.info("Attention weights not captured yet — run prediction again.")
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+# ────────────────────────────────────────────────
+# Multi-Agent Language Trap
+# ────────────────────────────────────────────────
+st.subheader("Multi-Agent Language Trap Simulation")
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
+N_AGENTS = st.slider("Number of Agents", 2, 20, 10)
+PRED_STEPS = st.slider("Prediction Steps", 10, 60, 30)
+osc_threshold = st.slider("Oscillation Trigger Threshold", 0.1, 1.0, 0.4)
+auto_damp = st.checkbox("Auto-Damping (Gbekie Condition)", value=True)
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-#poetry.toml
+if st.button("Run Language Trap Simulation"):
+    alpha = 0.0
+    history = np.zeros((PRED_STEPS + 1, len(df), N_AGENTS))
+    initial = preds  # from Transformer
+    history[0] = np.tile(initial, (N_AGENTS, 1)).T
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-#pdm.lock
-#pdm.toml
-.pdm-python
-.pdm-build/
+    damping_log = []
 
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-#pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
+    for step in range(PRED_STEPS):
+        current = history[step]
+        new_preds = np.zeros_like(current)
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+        for i in range(N_AGENTS):
+            others_mean = np.mean(np.delete(current, i, axis=1), axis=1)
+            new_preds[:, i] = (1 - alpha) * current[:, i] + alpha * (1 - others_mean)
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+        if auto_damp:
+            osc = np.std(new_preds - current)
+            if osc > osc_threshold:
+                alpha = min(0.5, alpha + 0.08)
+                damping_log.append(f"Step {step}: Oscillation {osc:.3f} → α = {alpha:.2f}")
+            else:
+                alpha = max(0.0, alpha - 0.015)
 
-# SageMath parsed files
-*.sage.py
+        history[step + 1] = new_preds
 
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+    humility = 1 - (alpha / 0.5)
+    st.metric("Final Damping α", f"{alpha:.2f}")
+    st.metric("Humility Score", f"{humility:.2f}", help="1 = fully damped & stable, 0 = trapped in oscillation")
 
-# Spyder project settings
-.spyderproject
-.spyproject
+    if damping_log:
+        st.text("Damping Events:\n" + "\n".join(damping_log[:8]) + ("..." if len(damping_log)>8 else ""))
 
-# Rope project settings
-.ropeproject
+    # Plot
+    fig, ax = plt.subplots(figsize=(12,6))
+    for i in range(N_AGENTS):
+        ax.plot(history[:, :, i].mean(axis=1), alpha=0.7, label=f'Agent {i+1}')
+    ax.axhline(2.0, color='red', linestyle='--', label='Critical')
+    ax.set_title('Multi-Agent Predictions (Average Across Days)')
+    ax.set_xlabel('Prediction Step')
+    ax.set_ylabel('Predicted Study Performance')
+    ax.legend(ncol=3)
+    ax.grid(True, alpha=0.3)
+    st.pyplot(fig)
 
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Abstra
-# Abstra is an AI-powered process automation framework.
-# Ignore directories containing user credentials, local state, and settings.
-# Learn more at https://abstra.io/docs
-.abstra/
-
-# Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# Cursor
-#  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
-
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+st.markdown("---")
+st.caption("Gbekie Trap AI — Transformer prediction meets multi-agent instability & humility damping")
